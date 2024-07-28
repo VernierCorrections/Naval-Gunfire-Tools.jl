@@ -267,8 +267,10 @@ function Single_Shot(firing_solution, shooter_coordinates, Ballistics_Parameters
     Naval_Ballistics_Integrator = init(Naval_Ballistics_IVP, AutoVern9(Rodas5P()), abstol = 10^-12, reltol = 10^-12)
     ϕ_new, λ_new = ϕ_shooter, λ_shooter
     impact_range = 0.0
+    max_geoalt = 0.0
     while true
         ϕ_old, λ_old = ϕ_new, λ_new
+        geoalt_old = max_geoalt
         step!(Naval_Ballistics_Integrator)
         S_out = Naval_Ballistics_Integrator.sol(Naval_Ballistics_Integrator.t)
         r_out = S_out[1:3]
@@ -276,6 +278,9 @@ function Single_Shot(firing_solution, shooter_coordinates, Ballistics_Parameters
         ϕ_new, λ_new, Δ_z, geoalt = Halting_Condition(r_out, a_body, b_body, e_first)
         impact_range += Vincenty(ϕ_new, λ_new, ϕ_old, λ_old, a_body, b_body, f_body)
         surfnorm = r_out + [0; 0; Δ_z]
+        if geoalt > geoalt_old
+            max_geoalt = geoalt
+        end
         if (geoalt <= 0.0) & (dot(surfnorm, v_out) <= 0.0)
             break
         end
@@ -286,7 +291,7 @@ function Single_Shot(firing_solution, shooter_coordinates, Ballistics_Parameters
     Final_Time_Solution = solve(Final_Time_Problem, ITP(), abstol = 10^-12, reltol = 10^-12)
     t_f = Final_Time_Solution.u
     S_f = Naval_Ballistics_Integrator.sol(t_f)
-    return impact_range, t_f, S_f
+    return impact_range, max_geoalt, t_f, S_f
     end
 
 
@@ -368,13 +373,15 @@ test_size = 53
 sampling_rate = 1.0 * π / 180
 elevation_matrix = zeros(test_size, 1)
 range_matrix = zeros(test_size, 1)
+ordinate_matrix = zeros(test_size, 1)
 time_matrix = zeros(test_size, 1)
 velocity_matrix = zeros(test_size, 1)
 deck_obliquity_matrix = zeros(test_size, 1)
 for i = 1:test_size
-    impact_range, time_matrix[i], S_f = Single_Shot(firing_solution, shooter_coordinates, Ballistics_Parameters, a_body, b_body, e_first, f_body)
+    impact_range, max_geoalt, time_matrix[i], S_f = Single_Shot(firing_solution, shooter_coordinates, Ballistics_Parameters, a_body, b_body, e_first, f_body)
     elevation_matrix[i] = firing_solution[2]
     range_matrix[i] = impact_range / 1852.0
+    ordinate_matrix[i] = max_geoalt / 0.3048
     r_f = S_f[1:3]
     v_f = S_f[4:6]
     velocity_matrix[i] = norm(v_f) / 0.3048
@@ -387,21 +394,25 @@ end
 elevation_matrix *= 180 / π
 belt_obliquity_matrix = 90.0 .- deck_obliquity_matrix
 range_plot = plot(range_matrix, elevation_matrix, title = "Firing Angle vs Range", label = "Simulated Results", xlabel = "Range (nautical miles)", ylabel = "Elevation (degrees)")
+height_plot = plot(range_matrix, ordinate_matrix, title = "Maximum Ordinate vs Range", label = "Simulated Results", xlabel = "Range (nautical miles)", ylabel = "Height (feet)")
 time_plot = plot(range_matrix, time_matrix, title = "Time of Flight vs Range", label = "Simulated Results", xlabel = "Range (nautical miles)", ylabel = "Time of Flight (seconds)")
 velocity_plot = plot(range_matrix, velocity_matrix, title = "Striking Velocity vs Range", label = "Simulated Results", ylims = (0.0, v_fps), xlabel = "Range (nautical miles)", ylabel = "Striking Velocity (feet per second)")
 obliquity_plot = plot(range_matrix, [belt_obliquity_matrix deck_obliquity_matrix], title = "Obliquity vs Range", label = ["Simulation Against Belt" "Simulation Against Deck"], ylims = (0.0, 90.0), xlabel = "Range (nautical miles)", ylabel = "Obliquity (degrees)")
 elevation_real = [2.36; 5.05; 8.16; 11.77; 16.03; 21.11; 27.37; 36.08; 45.00]
 range_real = [4572.0/1852.0; 9140.0/1852.0; 13716.0/1852.0; 18290.0/1852.0; 22860.0/1852.0; 27430.0/1852.0; 32000.0/1852.0; 36580.0/1852.0; 38720.0/1852.0]
+ordinate_real = [158.0, 703.0, 1770.0, 3530.0, 6230.0, 10210.0, 16120.0, 25770.0, 36610.0]
 time_real = [6.29; 13.24; 20.98; 29.59; 39.30; 50.32; 63.22; 79.96; 95.32]
 velocity_real = [2279.0; 2074.0; 1892.0; 1740.0; 1632.0; 1567.0; 1556.0; 1607.0; 1686.0]
 belt_obliquity_real = [2.50; 5.01; 9.78; 14.92; 21.12; 28.25; 36.27; 47.73; 51.23]
 deck_obliquity_real = 90.0 .- belt_obliquity_real
 plot!(range_plot, range_real, elevation_real, seriestype = :scatter, markershape = :star4, label = "US AP Mk 8 Shell (16 inch/50 calibre Mk 7)")
+plot!(height_plot, range_real, ordinate_real, seriestype = :scatter, markershape = :star4, label = "US AP Mk 8 Shell (16 inch/50 calibre Mk 7)")
 plot!(time_plot, range_real, time_real, seriestype = :scatter, markershape = :star4, label = "US AP Mk 8 Shell (16 inch/50 calibre Mk 7)")
 plot!(velocity_plot, range_real, velocity_real, seriestype = :scatter, markershape = :star4, label = "US AP Mk 8 Shell (16 inch/50 calibre Mk 7)")
 plot!(obliquity_plot, range_real, [belt_obliquity_real deck_obliquity_real], seriestype = :scatter, markershape = :star4, label = ["US AP Mk 8 Against Belt" "US AP Mk 8 Against Deck"])
 plot!(obliquity_plot, legend = :outerbottom, legendcolumns = 2)
 savefig(range_plot, "Range_Plot.png")
+savefig(height_plot, "Height_Plot.png")
 savefig(time_plot, "Time_Plot.png")
 savefig(velocity_plot, "Velocity_Plot.png")
 savefig(obliquity_plot, "Obliquity_Plot.png")
